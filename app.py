@@ -1,31 +1,29 @@
 import os
 import uuid
-from flask import Flask, request, render_template_string, redirect, url_for, send_from_directory, jsonify
+from flask import Flask, request, redirect, url_for, send_from_directory, jsonify
 from werkzeug.utils import secure_filename
 from flask_sqlalchemy import SQLAlchemy
 from datetime import datetime
 import pytz
-
-# Add this import for MySQL
-import pymysql
+import pymysql   # MySQL connector
 
 app = Flask(__name__)
 
 # InfinityFree MySQL connection
-# Make sure your database name is exactly as created in InfinityFree
 app.config['SQLALCHEMY_DATABASE_URI'] = (
     "mysql+pymysql://if0_41787435:OCzpJa0yjiF9id2@sql310.infinityfree.com:3306/if0_41787435_1233"
 )
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 app.config['SECRET_KEY'] = 'twarvis-secret-key-2024'
-app.config['UPLOAD_FOLDER'] = 'uploads'
-app.config['MAX_CONTENT_LENGTH'] = 50 * 1024 * 1024
 
-# Create uploads folder
+# ✅ Uploads folder in root
+app.config['UPLOAD_FOLDER'] = os.path.join(os.path.dirname(__file__), "uploads")
+app.config['MAX_CONTENT_LENGTH'] = 50 * 1024 * 1024
 os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
 
 db = SQLAlchemy(app)
 
+# Notes table
 class Note(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     title = db.Column(db.String(200), nullable=False)
@@ -37,10 +35,13 @@ class Note(db.Model):
     downloads = db.Column(db.Integer, default=0)
     created_at = db.Column(db.DateTime, default=lambda: datetime.now(pytz.UTC))
 
-# Create tables
-with app.app_context():
+# Initialize DB only once, after first request
+@app.before_first_request
+def init_db():
     db.create_all()
     print("✅ Database tables created successfully!")
 
-# Rest of your code continues here...
-# (The HTML template and routes remain the same)
+# Example route
+@app.route("/")
+def index():
+    return "Twarvis PDF Web is running with uploads in root!"
