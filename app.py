@@ -6,34 +6,14 @@ from flask_sqlalchemy import SQLAlchemy
 from datetime import datetime
 import pytz
 
-# Django settings configuration
-from django.conf import settings
-
-settings.configure(
-    DATABASES={
-        'default': {
-            'ENGINE': 'django.db.backends.mysql',
-            'NAME': 'if0_41787435_1233',   # create this in InfinityFree panel
-            'USER': 'if0_41787435',              # your InfinityFree username
-            'PASSWORD': 'OCzpJa0yjiF9id2',       # your InfinityFree password
-            'HOST': 'sql310.infinityfree.com',   # your InfinityFree MySQL host
-            'PORT': '3306',
-        }
-    },
-    INSTALLED_APPS=[
-        'django.contrib.contenttypes',
-        'django.contrib.auth',
-        'django.contrib.sessions',
-        'django.contrib.messages',
-        'django.contrib.staticfiles',
-        'notes',  # your notes app
-    ],
-)
-
 app = Flask(__name__)
-app.config['SECRET_KEY'] = 'twarvis-secret-key-2024'
-app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///twarvis.db'
+
+# InfinityFree MySQL connection
+app.config['SQLALCHEMY_DATABASE_URI'] = (
+    "mysql+pymysql://if0_41787435:OCzpJa0yjiF9id2@sql310.infinityfree.com:3306/if0_41787435_1233"
+)
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+app.config['SECRET_KEY'] = 'twarvis-secret-key-2024'
 app.config['UPLOAD_FOLDER'] = 'uploads'
 app.config['MAX_CONTENT_LENGTH'] = 50 * 1024 * 1024
 
