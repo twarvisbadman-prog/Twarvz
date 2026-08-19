@@ -1,3 +1,49 @@
+import os
+import uuid
+from flask import Flask, request, render_template_string, redirect, url_for, send_from_directory, jsonify
+from werkzeug.utils import secure_filename
+from flask_sqlalchemy import SQLAlchemy
+from datetime import datetime
+import pytz
+import pymysql
+
+app = Flask(__name__)
+
+# Database configuration
+app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('DATABASE_URL', 'mysql+pymysql://if0_41787435:OCzpJa0yjiF9id2@sql310.infinityfree.com:3306/if0_41787435_1233').replace('mysql://', 'mysql+pymysql://')
+app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'twarvis-secret-key-2024')
+app.config['UPLOAD_FOLDER'] = 'uploads'
+app.config['MAX_CONTENT_LENGTH'] = 50 * 1024 * 1024
+
+# Create uploads folder
+os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
+
+db = SQLAlchemy(app)
+
+# ============================================================
+#  DATABASE MODEL
+# ============================================================
+class Note(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    title = db.Column(db.String(200), nullable=False)
+    description = db.Column(db.Text, nullable=True)
+    category = db.Column(db.String(50), nullable=False)  # 'note' or 'pastpaper'
+    filename = db.Column(db.String(200), nullable=False)
+    original_name = db.Column(db.String(200), nullable=False)
+    file_size = db.Column(db.Integer, default=0)
+    downloads = db.Column(db.Integer, default=0)
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now(pytz.UTC))
+
+# Create tables
+with app.app_context():
+    db.create_all()
+    print("✅ Database tables created successfully!")
+
+# ============================================================
+#  HTML TEMPLATE - STUDY HUB DESIGN
+# ============================================================
+STUDY_HUB_HTML = '''
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -50,7 +96,7 @@
         .resource-icon { font-size: 2.5rem; margin-bottom: 10px; color: #ff3366; }
         .resource-title { font-size: 1.2rem; font-weight: 700; color: #ffaaaa; margin-bottom: 8px; }
         .resource-desc { color: #aa8888; font-size: 0.85rem; margin-bottom: 12px; line-height: 1.4; }
-        .resource-meta { display: flex; justify-content: space-between; align-items: center; margin-top: 12px; padding-top: 12px; border-top: 1px solid #2a1a1a; font-size: 0.75rem; color: #885555; }
+        .resource-meta { display: flex; justify-content: space-between; align-items: center; margin-top: 12px; padding-top: 12px; border-top: 1px solid #2a1a1a; font-size: 0.75rem; color: #885555; flex-wrap: wrap; gap: 8px; }
         .download-link { background: linear-gradient(135deg, #cc0033 0%, #990022 100%); color: white; padding: 6px 14px; border-radius: 25px; text-decoration: none; font-size: 0.8rem; font-weight: 600; transition: all 0.3s; display: inline-flex; align-items: center; gap: 5px; }
         .download-link:hover { transform: scale(1.05); background: #ff3366; }
         
@@ -78,7 +124,7 @@
         
         .admin-secret-area { position: fixed; bottom: 10px; left: 10px; width: 50px; height: 50px; opacity: 0; cursor: pointer; z-index: 200; background: transparent; }
         .admin-overview-list { max-height: 400px; overflow-y: auto; margin: 15px 0; }
-        .admin-item { background: #1f1f1f; margin: 8px 0; padding: 12px; border-radius: 12px; display: flex; justify-content: space-between; align-items: center; border-left: 3px solid #cc0033; }
+        .admin-item { background: #1f1f1f; margin: 8px 0; padding: 12px; border-radius: 12px; display: flex; justify-content: space-between; align-items: center; border-left: 3px solid #cc0033; flex-wrap: wrap; gap: 8px; }
         .admin-item-info { flex: 1; }
         .admin-item-info strong { color: #ff8888; }
         .admin-item-info small { color: #886666; display: block; font-size: 0.7rem; }
@@ -95,13 +141,14 @@
         @keyframes fadeInUp { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
         
         @media (max-width: 768px) { 
-            .container { padding: 15px; } 
             .hero h1 { font-size: 1.8rem; } 
             .header-content { flex-direction: column; text-align: center; } 
             .upload-btn { padding: 12px 20px; font-size: 0.85rem; } 
             .resource-grid { grid-template-columns: 1fr; } 
             .modal-content { margin: 20% auto; padding: 20px; }
             .stats { grid-template-columns: repeat(3, 1fr); }
+            .admin-item { flex-direction: column; }
+            .admin-item-actions { width: 100%; display: flex; justify-content: flex-end; }
         }
     </style>
 </head>
@@ -109,7 +156,7 @@
     <canvas id="matrix-canvas"></canvas>
 
     <div class="glass-overlay">
-        <!-- HEADER - NEW DESIGN -->
+        <!-- HEADER -->
         <div class="header">
             <div class="header-content">
                 <div class="logo-group">
@@ -117,20 +164,20 @@
                     <span class="logo-lightning">⚡ powered by twarvis</span>
                 </div>
                 <div class="nav-links">
-                    <div class="nav-icon" data-label="Home"><a href="#"><i class="fas fa-home"></i></a></div>
+                    <div class="nav-icon" data-label="Home"><a href="/"><i class="fas fa-home"></i></a></div>
                     <div class="nav-icon" data-label="Browse"><a href="#" id="browseNav"><i class="fas fa-book-open"></i></a></div>
                     <div class="nav-icon" data-label="Upload"><a href="#" id="uploadNav"><i class="fas fa-cloud-upload-alt"></i></a></div>
                 </div>
             </div>
         </div>
 
-        <!-- HERO - NEW -->
+        <!-- HERO -->
         <div class="hero">
             <h1>WELCOME TO STUDY HUB</h1>
             <p>Upload, browse, and dominate your studies — powered by the matrix.</p>
         </div>
 
-        <!-- STATS - SAME FUNCTIONALITY -->
+        <!-- STATS -->
         <div class="stats">
             <div class="stat-card">
                 <div class="stat-number" id="totalNotes">0</div>
@@ -146,7 +193,7 @@
             </div>
         </div>
 
-        <!-- TABS & RESOURCES - SAME FUNCTIONALITY -->
+        <!-- TABS & RESOURCES -->
         <div class="resource-section">
             <div class="section-title">📚 RESOURCE LIBRARY</div>
 
@@ -173,15 +220,15 @@
         </div>
     </div>
 
-    <!-- UPLOAD BUTTON - SAME FUNCTIONALITY -->
+    <!-- UPLOAD BUTTON -->
     <button class="upload-btn" onclick="openUploadModal()">
         <i class="fas fa-cloud-upload-alt"></i> Upload Notes / Past Paper
     </button>
 
-    <!-- HIDDEN ADMIN TRIGGER - SAME -->
+    <!-- HIDDEN ADMIN TRIGGER -->
     <div id="adminSecretZone" class="admin-secret-area" title=""></div>
 
-    <!-- UPLOAD MODAL - SAME -->
+    <!-- UPLOAD MODAL -->
     <div id="uploadModal" class="modal">
         <div class="modal-content">
             <span class="close" onclick="closeUploadModal()">&times;</span>
@@ -211,7 +258,7 @@
         </div>
     </div>
 
-    <!-- ADMIN MODAL - SAME -->
+    <!-- ADMIN MODAL -->
     <div id="adminModal" class="modal">
         <div class="modal-content">
             <span class="close" onclick="closeAdminModal()">&times;</span>
@@ -231,7 +278,7 @@
         </div>
     </div>
 
-    <!-- EDIT MODAL - SAME -->
+    <!-- EDIT MODAL -->
     <div id="editModal" class="modal">
         <div class="modal-content">
             <span class="close" onclick="closeEditModal()">&times;</span>
@@ -260,7 +307,7 @@
 
     <script>
         // ============================================================
-        //  MATRIX RAIN EFFECT - SAME AS ORIGINAL
+        //  MATRIX RAIN EFFECT
         // ============================================================
         const canvas = document.getElementById('matrix-canvas');
         const ctx = canvas.getContext('2d');
@@ -299,7 +346,7 @@
         window.addEventListener('resize', initMatrix);
 
         // ============================================================
-        //  TAB SWITCHING - SAME AS ORIGINAL
+        //  TAB SWITCHING
         // ============================================================
         function switchTab(tab) {
             const notesSection = document.getElementById('notesSection');
@@ -320,7 +367,7 @@
         }
 
         // ============================================================
-        //  MODAL FUNCTIONS - SAME AS ORIGINAL
+        //  MODAL FUNCTIONS
         // ============================================================
         function openUploadModal() {
             document.getElementById('uploadModal').style.display = 'block';
@@ -350,7 +397,7 @@
         }
 
         // ============================================================
-        //  UPLOAD FORM HANDLER - SAME AS ORIGINAL
+        //  UPLOAD FORM HANDLER
         // ============================================================
         document.getElementById('uploadForm').addEventListener('submit', async (e) => {
             e.preventDefault();
@@ -376,7 +423,7 @@
         });
 
         // ============================================================
-        //  LOAD RESOURCES - SAME AS ORIGINAL
+        //  LOAD RESOURCES
         // ============================================================
         async function loadResources() {
             try {
@@ -417,7 +464,7 @@
         }
 
         // ============================================================
-        //  LOAD STATISTICS - SAME AS ORIGINAL
+        //  LOAD STATISTICS
         // ============================================================
         async function loadStats() {
             try {
@@ -432,7 +479,7 @@
         }
 
         // ============================================================
-        //  HELPERS - SAME AS ORIGINAL
+        //  HELPERS
         // ============================================================
         function formatDate(dateStr) {
             if (!dateStr) return 'Recent';
@@ -459,7 +506,7 @@
         }
 
         // ============================================================
-        //  ADMIN PORTAL - SAME AS ORIGINAL
+        //  ADMIN PORTAL
         // ============================================================
         let clickCount = 0;
         let clickTimer;
@@ -572,7 +619,7 @@
         });
 
         // ============================================================
-        //  INITIAL LOAD - SAME AS ORIGINAL
+        //  INITIAL LOAD
         // ============================================================
         loadResources();
         loadStats();
@@ -580,3 +627,162 @@
     </script>
 </body>
 </html>
+'''
+
+# ============================================================
+#  ROUTES
+# ============================================================
+
+@app.route('/')
+def index():
+    return render_template_string(STUDY_HUB_HTML)
+
+@app.route('/api/resources')
+def get_resources():
+    notes = Note.query.order_by(Note.created_at.desc()).all()
+    return jsonify([{
+        'id': n.id,
+        'title': n.title,
+        'description': n.description,
+        'category': n.category,
+        'downloads': n.downloads,
+        'created_at': n.created_at.isoformat() if n.created_at else None,
+        'file_size': n.file_size
+    } for n in notes])
+
+@app.route('/statistics')
+def get_statistics():
+    notes_count = Note.query.filter_by(category='note').count()
+    papers_count = Note.query.filter_by(category='pastpaper').count()
+    total_downloads = db.session.query(db.func.sum(Note.downloads)).scalar() or 0
+    return jsonify({
+        'notes': notes_count,
+        'pastpapers': papers_count,
+        'downloads': total_downloads
+    })
+
+@app.route('/upload', methods=['POST'])
+def upload_file():
+    try:
+        category = request.form.get('type')
+        title = request.form.get('title')
+        description = request.form.get('description')
+        file = request.files.get('file')
+        
+        if not file:
+            return jsonify({'error': 'No file provided'}), 400
+        
+        # Generate unique filename
+        ext = file.filename.rsplit('.', 1)[-1].lower() if '.' in file.filename else ''
+        unique_name = f"{uuid.uuid4().hex}.{ext}" if ext else uuid.uuid4().hex
+        file_path = os.path.join(app.config['UPLOAD_FOLDER'], unique_name)
+        
+        # Save file
+        file.save(file_path)
+        file_size = os.path.getsize(file_path)
+        
+        # Save to database
+        note = Note(
+            title=title,
+            description=description,
+            category=category,
+            filename=unique_name,
+            original_name=file.filename,
+            file_size=file_size,
+            downloads=0
+        )
+        db.session.add(note)
+        db.session.commit()
+        
+        return jsonify({
+            'id': note.id,
+            'title': note.title,
+            'description': note.description,
+            'category': note.category,
+            'downloads': note.downloads,
+            'created_at': note.created_at.isoformat() if note.created_at else None,
+            'file_size': note.file_size
+        }), 201
+        
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/download/<int:note_id>')
+def download_file(note_id):
+    note = Note.query.get_or_404(note_id)
+    
+    # Increment downloads
+    note.downloads += 1
+    db.session.commit()
+    
+    file_path = os.path.join(app.config['UPLOAD_FOLDER'], note.filename)
+    if os.path.exists(file_path):
+        return send_from_directory(app.config['UPLOAD_FOLDER'], note.filename, as_attachment=True, download_name=note.original_name)
+    else:
+        return jsonify({'error': 'File not found'}), 404
+
+# ============================================================
+#  ADMIN ROUTES
+# ============================================================
+
+@app.route('/admin/resources')
+def admin_resources():
+    notes = Note.query.order_by(Note.created_at.desc()).all()
+    return jsonify([{
+        'id': n.id,
+        'title': n.title,
+        'description': n.description,
+        'category': n.category,
+        'downloads': n.downloads,
+        'created_at': n.created_at.isoformat() if n.created_at else None,
+        'file_size': n.file_size
+    } for n in notes])
+
+@app.route('/admin/resource/<int:note_id>')
+def admin_get_resource(note_id):
+    note = Note.query.get_or_404(note_id)
+    return jsonify({
+        'id': note.id,
+        'title': note.title,
+        'description': note.description,
+        'category': note.category
+    })
+
+@app.route('/admin/update/<int:note_id>', methods=['PUT'])
+def admin_update_resource(note_id):
+    note = Note.query.get_or_404(note_id)
+    data = request.json
+    
+    note.title = data.get('title', note.title)
+    note.description = data.get('description', note.description)
+    note.category = data.get('category', note.category)
+    
+    db.session.commit()
+    return jsonify({'success': True})
+
+@app.route('/admin/delete/<int:note_id>', methods=['DELETE'])
+def admin_delete_resource(note_id):
+    note = Note.query.get_or_404(note_id)
+    
+    # Delete file
+    file_path = os.path.join(app.config['UPLOAD_FOLDER'], note.filename)
+    if os.path.exists(file_path):
+        os.remove(file_path)
+    
+    db.session.delete(note)
+    db.session.commit()
+    return jsonify({'success': True})
+
+# ============================================================
+#  SERVE UPLOADED FILES
+# ============================================================
+@app.route('/uploads/<filename>')
+def uploaded_file(filename):
+    return send_from_directory(app.config['UPLOAD_FOLDER'], filename)
+
+# ============================================================
+#  START SERVER
+# ============================================================
+if __name__ == '__main__':
+    port = int(os.environ.get('PORT', 5000))
+    app.run(host='0.0.0.0', port=port, debug=False)
