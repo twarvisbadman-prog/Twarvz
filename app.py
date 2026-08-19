@@ -460,4 +460,176 @@ STUDY_HUB_HTML = '''
             if (response.ok) {
                 showToast('✏️ Resource updated successfully');
                 closeEditModal();
-                load
+                loadAdminOverview();
+                loadResources();
+                loadStats();
+            } else {
+                alert('Update failed');
+            }
+        });
+
+        loadResources();
+        loadStats();
+        setInterval(loadStats, 15000);
+    </script>
+</body>
+</html>
+'''
+
+# ============================================================
+#  ROUTES
+# ============================================================
+
+@app.route('/')
+def index():
+    return render_template_string(STUDY_HUB_HTML)
+
+@app.route('/api/resources')
+def get_resources():
+    notes = Note.query.order_by(Note.created_at.desc()).all()
+    return jsonify([{
+        'id': n.id,
+        'title': n.title,
+        'description': n.description,
+        'category': n.category,
+        'downloads': n.downloads,
+        'created_at': n.created_at.isoformat() if n.created_at else None,
+        'file_size': n.file_size
+    } for n in notes])
+
+@app.route('/statistics')
+def get_statistics():
+    notes_count = Note.query.filter_by(category='note').count()
+    papers_count = Note.query.filter_by(category='pastpaper').count()
+    total_downloads = db.session.query(db.func.sum(Note.downloads)).scalar() or 0
+    return jsonify({
+        'notes': notes_count,
+        'pastpapers': papers_count,
+        'downloads': total_downloads
+    })
+
+@app.route('/upload', methods=['POST'])
+def upload_file():
+    try:
+        category = request.form.get('type')
+        title = request.form.get('title')
+        description = request.form.get('description')
+        file = request.files.get('file')
+        
+        if not file:
+            return jsonify({'error': 'No file provided'}), 400
+        
+        # Generate unique filename
+        ext = file.filename.rsplit('.', 1)[-1].lower() if '.' in file.filename else ''
+        unique_name = f"{uuid.uuid4().hex}.{ext}" if ext else uuid.uuid4().hex
+        file_path = os.path.join(app.config['UPLOAD_FOLDER'], unique_name)
+        
+        # Save file
+        file.save(file_path)
+        file_size = os.path.getsize(file_path)
+        
+        # Save to database
+        note = Note(
+            title=title,
+            description=description,
+            category=category,
+            filename=unique_name,
+            original_name=file.filename,
+            file_size=file_size,
+            downloads=0
+        )
+        db.session.add(note)
+        db.session.commit()
+        
+        return jsonify({
+            'id': note.id,
+            'title': note.title,
+            'description': note.description,
+            'category': note.category,
+            'downloads': note.downloads,
+            'created_at': note.created_at.isoformat() if note.created_at else None,
+            'file_size': note.file_size
+        }), 201
+        
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/download/<int:note_id>')
+def download_file(note_id):
+    note = Note.query.get_or_404(note_id)
+    
+    # Increment downloads
+    note.downloads += 1
+    db.session.commit()
+    
+    file_path = os.path.join(app.config['UPLOAD_FOLDER'], note.filename)
+    if os.path.exists(file_path):
+        return send_from_directory(app.config['UPLOAD_FOLDER'], note.filename, as_attachment=True, download_name=note.original_name)
+    else:
+        return jsonify({'error': 'File not found'}), 404
+
+# ============================================================
+#  ADMIN ROUTES
+# ============================================================
+
+@app.route('/admin/resources')
+def admin_resources():
+    notes = Note.query.order_by(Note.created_at.desc()).all()
+    return jsonify([{
+        'id': n.id,
+        'title': n.title,
+        'description': n.description,
+        'category': n.category,
+        'downloads': n.downloads,
+        'created_at': n.created_at.isoformat() if n.created_at else None,
+        'file_size': n.file_size
+    } for n in notes])
+
+@app.route('/admin/resource/<int:note_id>')
+def admin_get_resource(note_id):
+    note = Note.query.get_or_404(note_id)
+    return jsonify({
+        'id': note.id,
+        'title': note.title,
+        'description': note.description,
+        'category': note.category
+    })
+
+@app.route('/admin/update/<int:note_id>', methods=['PUT'])
+def admin_update_resource(note_id):
+    note = Note.query.get_or_404(note_id)
+    data = request.json
+    
+    note.title = data.get('title', note.title)
+    note.description = data.get('description', note.description)
+    note.category = data.get('category', note.category)
+    
+    db.session.commit()
+    return jsonify({'success': True})
+
+@app.route('/admin/delete/<int:note_id>', methods=['DELETE'])
+def admin_delete_resource(note_id):
+    note = Note.query.get_or_404(note_id)
+    
+    # Delete file
+    file_path = os.path.join(app.config['UPLOAD_FOLDER'], note.filename)
+    if os.path.exists(file_path):
+        os.remove(file_path)
+    
+    db.session.delete(note)
+    db.session.commit()
+    return jsonify({'success': True})
+
+# ============================================================
+#  SERVE UPLOADED FILES
+# ============================================================
+@app.route('/uploads/<filename>')
+def uploaded_file(filename):
+    return send_from_directory(app.config['UPLOAD_FOLDER'], filename)
+
+# ============================================================
+#  START SERVER
+# ============================================================
+if __name__ == '__main__':
+    port = int(os.environ.get('PORT', 5000))
+    app.run(host='0.0.0.0', port=port, debug=False)
